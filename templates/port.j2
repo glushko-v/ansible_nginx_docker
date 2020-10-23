@@ -1,0 +1,11 @@
+server {
+  listen 80;
+
+  server_name docker.srwx.net;
+
+  location / {
+    proxy_pass http://34.65.243.3:{{ ephemeral_port }};
+  }
+
+}
+

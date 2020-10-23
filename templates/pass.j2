@@ -1,0 +1,11 @@
+server {
+  listen 80;
+
+  server_name vps@nginx;
+
+  location / {
+    proxy_pass http://34.65.243.3:7000;
+  }
+
+}
+

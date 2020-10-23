@@ -1,0 +1,67 @@
+- hosts: nginx
+  vars:
+    - app: []
+  tasks:
+    - name: 'Start or replace a container with docker_container module'
+      docker_container:
+        name: "gocalc-{{ ansible_date_time.epoch }}"
+        image: "vglushko/gocalc"
+        detach: True
+        labels:
+          app: "gocalc"
+        env:
+          test1: "es3211123fgjknjgkegnj"
+        ports:
+          - '7000'
+      register: docker_results
+      become: yes
+
+    - name: 'Retrieve container ID and ephemeral port'
+      set_fact:
+        container_id: "{{ docker_results.ansible_facts.docker_container.Id }}"
+        ephemeral_port: "{{ docker_results.ansible_facts.docker_container.NetworkSettings.Ports['7000/tcp'][0].HostPort }}"
+
+    - block:
+      - name: 'Verify that the new container is serving traffic'
+        uri:
+          url: "http://34.65.243.3:{{ ephemeral_port }}/"
+          status_code: 200
+        register: container_status
+        retries: "{{ app.health_retries | default('20') }}"
+        delay: "{{ app.health_retry_delay | default('2') }}"
+        until: "container_status.status == 200"
+      rescue:
+      - name: 'Terminate failed container'
+        shell: "docker stop {{ container_id }} ; docker rm --force {{ container_id }}"
+        ignore_errors: 'yes'
+
+      - fail:
+          msg: 'New container failed to return HTTP 200 and has been terminated'
+
+    - name: 'Updating nginx config'
+      template:
+        src: port.j2
+        dest: /etc/nginx/sites-enabled/pass
+      notify: reload nginx
+      become: yes
+
+    - name: 'Retrieve container IDs of previous web versions'
+      command: "docker ps -qa --no-trunc --filter 'label=app=gocalc'"
+      register: previous_containers
+      become: yes
+
+    - name: 'Queue previous containers to terminate in 2 minutes'
+      at:
+        command: "/usr/bin/docker rm --force {{ item }}"
+        count: 1
+        units: 'minutes'
+      with_items: "{{ previous_containers.stdout_lines }}"
+      when: (item.find(container_id) == -1)
+      become: yes
+
+  handlers:
+  - name: reload nginx
+    service:
+      name: nginx
+      state: reloaded
+    become: yes
